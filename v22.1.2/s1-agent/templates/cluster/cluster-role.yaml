@@ -1,0 +1,14 @@
+{{ if .Values.helper.rbac.create }}
+apiVersion: {{ template "clusterRole.apiVersion" . }}
+kind: ClusterRole
+metadata:
+  name: {{ include "helper.fullname" . }}
+  labels: {{- include "sentinelone.agent.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "namespaces", "replicationcontrollers"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["batch", "apps"]
+  resources: ["jobs", "deployments", "daemonsets", "replicasets", "statefulsets", "crontabs"]
+  verbs: ["get", "watch", "list"]
+{{ end }}

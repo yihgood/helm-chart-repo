@@ -1,0 +1,68 @@
+apiVersion: {{ template "deployment.apiVersion" . }}
+kind: Deployment
+metadata:
+  name: {{ include "helper.fullname" . }}
+  labels:
+    {{- include "sentinelone.helper.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sentinelone.helper.selector.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sentinelone.helper.labels" . | nindent 8 }}
+    spec:
+{{- if .Values.secrets.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.secrets.imagePullSecret }}
+{{- end }}
+      serviceAccountName: {{ include "sentinelone.serviceAccountName" . }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: helper
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ default "docker.pkg.github.com/s1-agents/cwpp_agent/s1helper" .Values.configuration.repositories.helper }}:{{ default .Values.configuration.tag.agent .Values.configuration.tag.helper }}"
+          imagePullPolicy: {{ default "IfNotPresent" .Values.configuration.imagePullPolicy }}
+          env:
+{{- if .Values.configuration.cluster.name }}
+          - name: CLUSTER_NAME
+            value: {{ .Values.configuration.cluster.name }}
+{{- end }}
+          - name: SERVER_PORT
+            value: "8080"
+          - name: LOG_LEVEL
+            value: {{ .Values.configuration.env.helper.log_level }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+        {{- if .Values.helper.probe }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+        {{- end }}
+          resources:
+            {{- toYaml .Values.helper.resources | nindent 12 }}
+    {{- with .Values.helper.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.helper.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.helper.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+    {{- end }}

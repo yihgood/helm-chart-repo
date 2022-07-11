@@ -1,0 +1,123 @@
+apiVersion: {{ template "daemonset.apiVersion" . }}
+kind: DaemonSet
+metadata:
+  name: {{ include "agent.fullname" . }}
+  labels: {{- include "sentinelone.agent.labels" . | nindent 4 }}
+spec:
+  updateStrategy:
+    type: {{ default "RollingUpdate" .Values.agent.updateStrategy }}
+  selector:
+    matchLabels:
+{{- include "sentinelone.agent.selector.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+{{- include "sentinelone.agent.labels" . | nindent 8 }}
+      {{- if .Values.agent.podAnnotations }}
+      annotations:
+{{ toYaml .Values.agent.podAnnotations | indent 8 }}
+      {{- end }}
+    spec:
+{{- if .Values.secrets.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.secrets.imagePullSecret }}
+{{- end }}
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        runAsUser: {{ .Values.configuration.env.agent.pod_uid }}
+        runAsGroup: {{ .Values.configuration.env.agent.pod_gid }}
+      restartPolicy: Always
+      serviceAccountName: {{ include "sentinelone.serviceAccountName" . }}
+      containers:
+      - name: agent
+        image: "{{ default "docker.pkg.github.com/s1-agents/cwpp_agent/s1agent" .Values.configuration.repositories.agent }}:{{ required "Must set the appropriate tag for image pullling" .Values.configuration.tag.agent }}"
+        imagePullPolicy: {{ default "IfNotPresent" .Values.configuration.imagePullPolicy }}
+        resources:
+{{ toYaml .Values.agent.resources | indent 10 }}
+        env:
+{{- if include "site_key.secret.name" . }}
+        - name: SITE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "site_key.secret.name" . }}
+              key: site-key
+{{- end }}
+        - name: S1_USE_CUSTOM_CA
+          value: "{{ .Values.configuration.custom_ca }}"
+        - name: S1_HELPER_ADDRESS
+          value: {{ include "helper.fullname" . }}
+        - name: S1_HELPER_PORT
+          value: "80"
+        - name: S1_AGENT_HOST_MOUNT_PATH
+          value: "{{ default "/host" .Values.configuration.env.agent.host_mount_path }}"
+        - name: S1_MANAGEMENT_PROXY
+          value: "{{ default "" .Values.configuration.proxy }}"
+        - name: S1_DV_PROXY
+          value: "{{ default "" .Values.configuration.dv_proxy }}"
+        - name: S1_HEAP_TRIMMING_ENABLE
+          value: "{{ .Values.configuration.env.agent.heap_trimming_enable }}"
+        - name: S1_HEAP_TRIMMING_INTERVAL
+          value: "{{ .Values.configuration.env.agent.heap_trimming_interval }}"
+        - name: S1_LOG_LEVEL
+          value: "{{ .Values.configuration.env.agent.log_level }}"
+        - name: S1_POD_UID
+          value: "{{ .Values.configuration.env.agent.pod_uid }}"
+        - name: S1_POD_GID
+          value: "{{ .Values.configuration.env.agent.pod_gid }}"
+        volumeMounts:
+{{- if .Values.configuration.custom_ca }}
+{{- range $path, $_ := .Files.Glob "files/*.pem" }}
+          - name: ca-certs
+            mountPath: "/usr/local/share/ca-certificates/{{ base $path }}"
+            subPath: "{{ base $path }}"
+{{- end }}
+{{- end }}
+          - name: debugfs
+            mountPath: /sys/kernel/debug/
+          - name: host
+            mountPath: {{ default "/host" .Values.configuration.env.agent.host_mount_path }}
+            mountPropagation: HostToContainer
+        securityContext:
+          capabilities:
+            add:
+              - AUDIT_CONTROL
+              - AUDIT_WRITE
+              - DAC_OVERRIDE
+              - DAC_READ_SEARCH
+              - FOWNER
+              - IPC_LOCK
+              - KILL
+              - NET_ADMIN
+              - NET_RAW
+              - SETGID
+              - SETUID
+              - SYS_ADMIN
+              - SYS_PTRACE
+              - SYS_RAWIO
+              - SYS_RESOURCE
+              - SYSLOG
+              - SYS_CHROOT
+              - SYS_MODULE
+      volumes:
+{{- if .Values.configuration.custom_ca }}
+        - name: ca-certs
+          secret:
+            secretName: "{{ include "agent.fullname" . }}-custom-ca"
+{{- end }}
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug/
+        - name: host
+          hostPath:
+            path: /
+    {{- with .Values.agent.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.agent.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.agent.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+    {{- end }}
